@@ -8,6 +8,7 @@ Emits user events to segment.io
 * User Track "Signed Up"
 * User Track "Post Created"
 * User Track "Topic Created"
+* User Page View
 
 # Usage
 

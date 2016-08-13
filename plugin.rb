@@ -10,6 +10,9 @@ after_initialize do
   require 'segment/analytics'
 
   SEGMENT_IO_KEY = ENV['SEGMENT_IO_KEY']
+  unless SEGMENT_IO_KEY
+    raise StandardError, 'Segment.io WriteKey must be defined as an environment variable  `export SEGMENT_IO_KEY={YOUR_KEY_HERE}`'
+  end
   Analytics = Segment::Analytics.new(
     write_key: SEGMENT_IO_KEY,
     on_error: proc { |_status, msg| print msg }
@@ -52,6 +55,25 @@ after_initialize do
         user_id: id,
         event: 'Signed Up'
       )
+    end
+  end
+
+  class ::ApplicationController
+    before_filter :emit_segment_user_tracker
+    def emit_segment_user_tracker
+      if current_user
+        Analytics.page(
+          user_id: current_user.id,
+          name: "#{controller_name}##{action_name}",
+          properties: {
+            url: request.original_url
+          },
+          context: {
+            ip: request.ip,
+            userAgent: request.user_agent
+          }
+        )
+      end
     end
   end
 
