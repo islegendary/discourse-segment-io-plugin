@@ -9,7 +9,7 @@ gem 'analytics-ruby', '2.2.2', require: false # 'segment/analytics'
 after_initialize do
   require 'segment/analytics'
 
-  SEGMENT_IO_KEY = 'Vq4UQZL5IaodXQZo9z8QjwLEFzVkN2yq'.freeze
+  SEGMENT_IO_KEY = ENV['SEGMENT_IO_KEY']
   Analytics = Segment::Analytics.new(
     write_key: SEGMENT_IO_KEY,
     on_error: proc { |_status, msg| print msg }
