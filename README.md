@@ -16,7 +16,7 @@ Once installed, the plugin will automatically push the supported events to Segme
 
 # Installation
 
-<iframe width="420" height="315" src="https://www.youtube.com/embed/AKR3ki9Kj38" frameborder="0" allowfullscreen></iframe>
+Watch Tutorial Video: https://youtu.be/AKR3ki9Kj38
 
 In segment.io you will need a `ruby` source to receive the incoming events.
 
