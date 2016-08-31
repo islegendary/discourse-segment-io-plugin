@@ -61,7 +61,7 @@ after_initialize do
   class ::ApplicationController
     before_filter :emit_segment_user_tracker
     def emit_segment_user_tracker
-      if current_user
+      if current_user && !segment_common_controller_actions?
         Analytics.page(
           user_id: current_user.id,
           name: "#{controller_name}##{action_name}",
@@ -74,6 +74,10 @@ after_initialize do
           }
         )
       end
+    end
+
+    def segment_common_controller_actions?
+      controller_name == 'stylesheets' || controller_name == 'user_avatars' || (controller_name == 'about' && action_name == 'live_post_counts')
     end
   end
 
