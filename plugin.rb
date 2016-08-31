@@ -32,6 +32,7 @@ after_initialize do
     Jobs.enqueue(:emit_segment_user_identify, user_id: user.id)
   end
 
+  require_dependency 'user'
   class ::User
     after_create :emit_segment_user_identify
     after_create :emit_segment_user_created
@@ -58,6 +59,7 @@ after_initialize do
     end
   end
 
+  require_dependency 'application_controller'
   class ::ApplicationController
     before_filter :emit_segment_user_tracker
     def emit_segment_user_tracker
@@ -81,6 +83,7 @@ after_initialize do
     end
   end
 
+  require_dependency 'post'
   class ::Post
     after_create :emit_segment_post_created
 
@@ -97,6 +100,7 @@ after_initialize do
     end
   end
 
+  require_dependency 'topic'
   class ::Topic
     after_create :emit_segment_topic_created
 
