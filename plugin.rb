@@ -6,22 +6,28 @@
 gem 'commander', '4.4.0' # , require: false # for analytics-ruby
 gem 'analytics-ruby', '2.2.2', require: false # 'segment/analytics'
 
+enabled_site_setting :segment_io_enabled
+
 after_initialize do
   require 'segment/analytics'
 
-  SEGMENT_IO_KEY = ENV['SEGMENT_IO_KEY']
-  unless SEGMENT_IO_KEY
-    raise StandardError, 'Segment.io WriteKey must be defined as an environment variable  `export SEGMENT_IO_KEY={YOUR_KEY_HERE}`'
+  class Analytics
+    def self.method_missing(method, *args)
+      return unless SiteSetting.segment_io_enabled
+      analytics = Segment::Analytics.new(
+        write_key: SiteSetting.segment_io_write_key
+      )
+      super(method, *args) unless analytics.respond_to?(method)
+      analytics.send(method, *args)
+      analytics.flush
+    end
   end
-  Analytics = Segment::Analytics.new(
-    write_key: SEGMENT_IO_KEY,
-    on_error: proc { |_status, msg| print msg }
-  )
 
   require_dependency 'jobs/base'
   module ::Jobs
     class EmitSegmentUserIdentify < Jobs::Base
       def execute(args)
+        return unless SiteSetting.segment_io_enabled?
         user = User.find_by_id(args[:user_id])
         user.emit_segment_user_identify if user
       end
@@ -36,6 +42,7 @@ after_initialize do
   class ::User
     after_create :emit_segment_user_identify
     after_create :emit_segment_user_created
+
     def emit_segment_user_identify
       Analytics.identify(
         user_id: id,
@@ -43,7 +50,8 @@ after_initialize do
           name: name,
           username: username,
           email: email,
-          created_at: created_at
+          created_at: created_at,
+          internal: email.ends_with?('@pagerduty.com')
         },
         context: {
           ip: ip_address
@@ -62,6 +70,14 @@ after_initialize do
   require_dependency 'application_controller'
   class ::ApplicationController
     before_filter :emit_segment_user_tracker
+
+    SEGMENT_IO_EXCLUDES = {
+      'stylesheets' => :all,
+      'user_avatars' => :all,
+      'about' => ['live_post_counts'],
+      'topics' => ['timings']
+    }.freeze
+
     def emit_segment_user_tracker
       if current_user && !segment_common_controller_actions?
         Analytics.page(
@@ -79,7 +95,9 @@ after_initialize do
     end
 
     def segment_common_controller_actions?
-      controller_name == 'stylesheets' || controller_name == 'user_avatars' || (controller_name == 'about' && action_name == 'live_post_counts')
+      SEGMENT_IO_EXCLUDES.keys.include?(controller_name) &&
+      (SEGMENT_IO_EXCLUDES[controller_name] == :all ||
+       SEGMENT_IO_EXCLUDES[controller_name].include?(action_name) )
     end
   end
 
@@ -92,9 +110,11 @@ after_initialize do
         user_id: user_id,
         event: 'Post Created',
         properties: {
-          slug: topic.slug,
-          title: topic.title,
-          url: topic.url
+          topic_id: topic_id,
+          post_number: post_number,
+          created_at: created_at,
+          since_topic_created: (created_at - topic.created_at).to_i,
+          reply_to_post_number: reply_to_post_number
         }
       )
     end
@@ -112,6 +132,38 @@ after_initialize do
           slug: slug,
           title: title,
           url: url
+        }
+      )
+    end
+  end
+
+  require_dependency 'topic_tag'
+  class ::TopicTag
+    after_create :emit_segment_topic_tagged
+
+    def emit_segment_topic_tagged
+      Analytics.track(
+        anonymous_id: -1,
+        event: 'Topic Tag Created',
+        properties: {
+          topic_id: topic_id,
+          tag_name: tag.name
+        }
+      )
+    end
+  end
+
+  require_dependency 'user_action'
+  class ::UserAction
+    after_create :emit_segment_post_liked, if: -> { self.action_type == UserAction::LIKE }
+
+    def emit_segment_post_liked
+      Analytics.track(
+        user_id: user_id,
+        event: 'Post Liked',
+        properties: {
+          post_id: target_post_id,
+          topic_id: target_topic_id
         }
       )
     end

@@ -7,7 +7,9 @@ Emits user events to segment.io
 * User identify
 * User Track "Signed Up"
 * User Track "Post Created"
+* User Track "Post Liked"
 * User Track "Topic Created"
+* User Track "Topic Tag Created"
 * User Page View
 
 # Usage
@@ -19,22 +21,6 @@ Once installed, the plugin will automatically push the supported events to Segme
 Watch Tutorial Video: https://youtu.be/AKR3ki9Kj38
 
 In segment.io you will need a `ruby` source to receive the incoming events.
-
-To install using docker, add the following to your `app.yml` in the plugins section:
-
-    env:
-      SEGMENT_IO_KEY: xxx
-    hooks:
-      after_code:
-        - exec:
-            cd: $home/plugins
-            cmd:
-              - git clone https://github.com/kylewelsby/discourse-segment-io-plugin.git
-
-and rebuild your docker via
-
-    cd /var/discourse
-    ./launcher rebuild app
 
 # Contributing
 

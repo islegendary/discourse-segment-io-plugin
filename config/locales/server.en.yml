@@ -1,0 +1,4 @@
+en:
+  site_settings:
+    segment_io_enabled: "Is Segment IO enabled?"
+    segment_io_write_key: 'What is the segment io write key?'

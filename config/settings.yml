@@ -1,0 +1,7 @@
+plugins:
+  segment_io_enabled:
+    default: false
+    client: false
+  segment_io_write_key:
+    default: ''
+    client: false
