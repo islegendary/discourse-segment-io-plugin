@@ -16,6 +16,17 @@ Emits user events to segment.io
 
 Once installed, the plugin will automatically push the supported events to Segment.io
 
+# Backfilling
+
+If you'd like to trigger the segments for existing users, open up a rails console and
+run the following:
+
+```ruby
+User.pluck(:id).each do |uid|
+  Jobs.enqueue(:emit_segment_user_identify, user_id: uid)
+end
+```
+
 # Installation
 
 Watch Tutorial Video: https://youtu.be/AKR3ki9Kj38
