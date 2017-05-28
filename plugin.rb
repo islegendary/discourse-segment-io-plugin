@@ -34,10 +34,6 @@ after_initialize do
     end
   end
 
-  User.find_each do |user|
-    Jobs.enqueue(:emit_segment_user_identify, user_id: user.id)
-  end
-
   require_dependency 'user'
   class ::User
     after_create :emit_segment_user_identify
