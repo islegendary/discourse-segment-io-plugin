@@ -51,7 +51,7 @@ after_initialize do
           username: username,
           email: email,
           created_at: created_at,
-          internal: email.ends_with?('@pagerduty.com')
+          internal: internal_user?
         },
         context: {
           ip: ip_address
@@ -64,6 +64,11 @@ after_initialize do
         user_id: id,
         event: 'Signed Up'
       )
+    end
+
+    def internal_user?
+      return false if SiteSetting.segment_io_internal_domain.blank?
+      email.ends_with?(SiteSetting.segment_io_internal_domain)
     end
   end
 
@@ -114,7 +119,8 @@ after_initialize do
           post_number: post_number,
           created_at: created_at,
           since_topic_created: (created_at - topic.created_at).to_i,
-          reply_to_post_number: reply_to_post_number
+          reply_to_post_number: reply_to_post_number,
+          internal: user.internal_user?
         }
       )
     end
@@ -131,7 +137,8 @@ after_initialize do
         properties: {
           slug: slug,
           title: title,
-          url: url
+          url: url,
+          internal: user.internal_user?
         }
       )
     end
@@ -163,7 +170,8 @@ after_initialize do
         event: 'Post Liked',
         properties: {
           post_id: target_post_id,
-          topic_id: target_topic_id
+          topic_id: target_topic_id,
+          internal: user.internal_user?
         }
       )
     end
