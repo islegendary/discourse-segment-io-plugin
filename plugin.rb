@@ -167,7 +167,8 @@ after_initialize do
         properties: {
           post_id: target_post_id,
           topic_id: target_topic_id,
-          internal: user.internal_user?
+          internal: user.internal_user?,
+          like_count: target_topic.like_count
         }
       )
     end
