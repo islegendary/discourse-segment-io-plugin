@@ -70,7 +70,7 @@ after_initialize do
 
   require_dependency 'application_controller'
   class ::ApplicationController
-    before_filter :emit_segment_user_tracker
+    before_action :emit_segment_user_tracker
 
     SEGMENT_IO_EXCLUDES = {
       'stylesheets' => :all,
