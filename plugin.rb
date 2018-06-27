@@ -3,7 +3,6 @@
 # version: 0.0.1
 # authors: Kyle Welsby <kyle@mekyle.com>
 
-gem 'commander', '4.4.3' # , require: false # for analytics-ruby
 gem 'analytics-ruby', '2.2.2', require: false # 'segment/analytics'
 
 enabled_site_setting :segment_io_enabled
