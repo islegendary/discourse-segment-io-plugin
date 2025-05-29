@@ -2,9 +2,25 @@ plugins:
   segment_io_enabled:
     default: false
     client: false
+
   segment_io_write_key:
     default: ''
     client: false
+
   segment_io_internal_domain:
     default: ''
     client: false
+
+  segment_io_debug_enabled:
+    default: false
+    client: false
+
+  segment_io_user_id_source:
+    default: 'email'
+    client: false
+    type: enum
+    choices:
+      - email           # User's email as userId
+      - sso_external_id # SSO external ID as userId
+      - use_anon        # Uses custom 36-char anonymousId
+      - discourse_id    # Original Discourse User ID as userId
