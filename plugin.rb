@@ -1,126 +1,190 @@
 # name: Segment.io
 # about: Import your Discourse data to your Segment.io warehouse
-# version: 0.0.1
-# authors: Kyle Welsby <kyle@mekyle.com>
+# version: 1.0.1
+# authors: Kyle Welsby (Original), updated by Donnie W
 
-gem 'commander', '4.4.3' # , require: false # for analytics-ruby
-gem 'analytics-ruby', '2.2.2', require: false # 'segment/analytics'
+gem 'commander', '4.4.3'
+gem 'analytics-ruby', '2.2.2', require: false
 
 enabled_site_setting :segment_io_enabled
 
 after_initialize do
   require 'segment/analytics'
- 
-module DiscourseSegmentIdStrategy # New feature to allow for email <default> or sso is as userId with fallback to anonymous_id.  
-  # Method to generate your custom "DECIMAL-HEX" anonymousId
-  def self.generate_user_custom_anonymous_id(user) # Renamed for clarity within the module
-    return nil unless user && user.id
-    b = user.id.to_s # Original Discourse User ID as string
-    s = b.each_char.with_index.sum { |c, i| c.ord * (i + 1) }
-    h = b.length.to_s(36) + s.to_s(36) + b.reverse.chars.map { |c| (c.ord % 36).to_s(36) }.join
-    need = 36 - b.length - 4
-    if need <= 0
-      return "#{b}-dc-ERROR_UID_TOO_LONG" if need < 0 # Basic error handling
-      return "#{b}-dc-" if need == 0 # No derived part if need is 0
+  # Using OpenSSL::Digest as per your preference in the last module snippet.
+  # No explicit 'require "openssl"' needed as it's typically part of stdlib loaded by Rails/Discourse.
+
+  module DiscourseSegmentIdStrategy
+    # Thread-safe fallback ID for guests with no session
+    def self.fallback_guest_id
+      Thread.current[:segment_fallback_guest_id] ||= "g#{SecureRandom.alphanumeric(35).downcase}"
     end
-    pad = (need == 1) ? '0' : ('06' * ((need + 1) / 2))
-    derived_part = (pad + h).slice(-need, need)
-    "#{b}-dc-#{derived_part}"
-  end
-  def self.get_segment_identifiers(user)
-    return { anonymous_id: "sys_anon_#{Time.now.to_f.to_s.delete('.')}_#{rand(1_000_000)}" } unless user
-    
-    identifiers = {}
-    case SiteSetting.segment_io_user_id_source # This site setting needs to be defined in config/settings.yml
-    when 'email'
-      identifiers[:user_id] = user.email if user.email.present?
-    when 'sso_external_id'
-      sso_id = user.single_sign_on_record&.external_id || user.external_id
-      identifiers[:user_id] = sso_id if sso_id.present?
-    when 'use_anon' # We'll confirm this name with you
-      identifiers[:anonymous_id] = generate_user_custom_anonymous_id(user)
-    when 'discourse_id' # Original behavior
-      identifiers[:user_id] = user.id.to_s
-    else # Default or unknown - might send original ID or nothing for user specific
-      identifiers[:user_id] = user.id.to_s # Fallback to original
-      Rails.logger.warn "[Segment.io Plugin] Unknown segment_io_user_id_source: '#{SiteSetting.segment_io_user_id_source}'. Defaulting to Discourse ID for user #{user.id}."
+
+    # Generates a 36-char anonymous ID using user.id and hash
+    def self.generate_user_custom_anonymous_id(user)
+      return nil unless user&.id
+
+      prefix = "#{user.id}-dc-" # fixed prefix with user.id
+      input = "discourse_custom_anon_v1:#{user.id}:#{Rails.application.secret_key_base}" # salt input with app secret
+      
+      # OpenSSL::Digest is preloaded in Discourse/Rails environments, no extra 'require' needed
+      full_hash = OpenSSL::Digest::SHA256.hexdigest(input) # hashed string stays stable per user
+
+      remaining_len = 36 - prefix.length
+      # Trim hash so final ID = 36 chars
+      hash_segment = remaining_len > 0 ? full_hash[0...remaining_len] : ""
+      
+      "#{prefix}#{hash_segment}"
     end
-    identifiers.compact # Remove nil values
+
+    # Returns the appropriate identifier (user_id or anonymous_id)
+    def self.get_segment_identifiers(user, session = nil)
+      unless user
+        if session
+          # For guests with session: generate once, reuse
+          session[:segment_guest_id] ||= "g#{SecureRandom.alphanumeric(35).downcase}"
+          return { anonymous_id: session[:segment_guest_id] }
+        else
+          # No user or session: fallback to thread-safe shared guest ID
+          return { anonymous_id: fallback_guest_id }
+        end
+      end
+
+      # Use the configured strategy for identifying logged-in users
+      setting = SiteSetting.segment_io_user_id_source
+
+      case setting
+      when 'email'
+        # Use email as user_id if present
+        if user.email.present?
+          return { user_id: user.email }
+        else
+          Rails.logger.warn "[Segment.io Plugin] 'email' selected but missing for user #{user.id}"
+        end
+      when 'sso_external_id'
+        # Use SSO external ID if available
+        sso = user.single_sign_on_record&.external_id || user.external_id
+        if sso.present?
+          return { user_id: sso }
+        else
+          Rails.logger.warn "[Segment.io Plugin] 'sso_external_id' selected but missing for user #{user.id}"
+        end
+      when 'use_anon'
+        # Force anonymous_id for all users
+        anon_id = generate_user_custom_anonymous_id(user)
+        return { anonymous_id: anon_id } if anon_id # Should always return an ID if user is present
+      when 'discourse_id'
+        # Use Discourse user.id as string
+        return { user_id: user.id.to_s }
+      else
+        # Unknown config value
+        Rails.logger.warn "[Segment.io Plugin] Unknown user_id_source: '#{setting}' for user #{user.id}"
+      end
+
+      # Fallback: try to generate anon ID, else return safe random
+      # This is reached if the chosen strategy for an authenticated user didn't return an ID (e.g., email missing).
+      fallback = generate_user_custom_anonymous_id(user) || begin
+        Rails.logger.error "[Segment.io Plugin] Failed to generate custom anonymous_id for user #{user&.id}, using emergency fallback."
+        "err_ua_#{SecureRandom.alphanumeric(29).downcase}" # Ensures a 36-char ID
+      end
+      { anonymous_id: fallback }
+    end
+
+    # Trait hash sent with identify() call
+    def self.get_user_traits(user)
+      return {} unless user
+      {
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        created_at: user.created_at.iso8601,
+        internal: user.internal_user? # flag used to segment internal team users
+      }.compact
+    end
   end
-  # Helper to get common user traits
-  def self.get_user_traits(user)
-    return {} unless user
-    {
-      name: user.name,
-      username: user.username,
-      email: user.email, # Always good to send email as a trait
-      created_at: user.created_at,
-      # Add other traits from original plugin:
-      internal: user.respond_to?(:internal_user?) ? user.internal_user? : nil
-      # You can add more traits here if needed
-    }.compact
-  end
-end
 
   class Analytics
-    def self.method_missing(method, *args)
-      return unless SiteSetting.segment_io_enabled
-      analytics = Segment::Analytics.new(
-        write_key: SiteSetting.segment_io_write_key
-      )
-      super(method, *args) unless analytics.respond_to?(method)
-      analytics.send(method, *args)
-      analytics.flush
+    @client_mutex = Mutex.new
+
+    # Singleton Segment client (thread-safe)
+    def self.client
+      return nil unless SiteSetting.segment_io_enabled? && SiteSetting.segment_io_write_key.present?
+      @client_mutex.synchronize do
+        @client ||= Segment::Analytics.new(
+          write_key: SiteSetting.segment_io_write_key,
+          on_error: proc { |status, msg| Rails.logger.error "[Segment.io Plugin] Segment error #{status}: #{msg}" }
+        )
+      end
+    end
+
+    # Delegate tracking methods to the Segment client
+    def self.method_missing(method, *args, &block)
+      if segment_client = client # Assign and check if client is available
+        if segment_client.respond_to?(method)
+          return segment_client.send(method, *args, &block)
+        else
+          Rails.logger.warn "[Segment.io Plugin] Analytics client does not respond to unknown method: #{method}"
+          # To maintain standard Ruby behavior for unhandled methods, call super.
+          # If you intend to swallow these errors and return nil, this is a conscious choice.
+          # For now, returning nil as per your last version's implicit behavior for this path.
+        end
+      end
+      nil # Return nil if client is not available or if method is unknown and not re-raised
+    end
+
+    def self.respond_to_missing?(method, include_private = false)
+      client&.respond_to?(method, include_private) || super
     end
   end
 
-  require_dependency 'jobs/base'
   module ::Jobs
-    class EmitSegmentUserIdentify < Jobs::Base
+    class EmitSegmentUserIdentify < ::Jobs::Base
+      # Job enqueued after user signup to trigger identify
       def execute(args)
         return unless SiteSetting.segment_io_enabled?
         user = User.find_by_id(args[:user_id])
-        user.emit_segment_user_identify if user
+        user&.perform_segment_user_identify
       end
     end
   end
 
-  require_dependency 'user'
   class ::User
-    after_create :emit_segment_user_identify
-    after_create :emit_segment_user_created
+    # Fire both identify and signup events in order
+    after_create do
+      enqueue_segment_identify_job
+      emit_segment_user_created
+    end
 
-    def emit_segment_user_identify
-      # Get the appropriate user_id or anonymous_id based on site settings
+    def enqueue_segment_identify_job
+      Jobs.enqueue(:emit_segment_user_identify, user_id: self.id)
+    end
+
+    def perform_segment_user_identify # Method called by the background job
+      return unless SiteSetting.segment_io_enabled?
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(self)
-      payload = identifiers.merge( # Start with user_id/anonymous_id
-        traits: ::DiscourseSegmentIdStrategy.get_user_traits(self) # Add traits
-      )
-      if self.respond_to?(:ip_address) && self.ip_address.present?
-        payload[:context] = { ip: self.ip_address }
-      end
-    
+      return if identifiers.empty?
+
+      # Compose payload with traits and optional IP
+      payload = identifiers.merge(traits: ::DiscourseSegmentIdStrategy.get_user_traits(self))
+      payload[:context] = { ip: ip_address } if respond_to?(:ip_address) && ip_address.present?
+
       Analytics.identify(payload)
     end
 
     def emit_segment_user_created
-      # Get the appropriate user_id or anonymous_id based on site settings
+      return unless SiteSetting.segment_io_enabled?
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(self)
-      # Prepare the payload for Analytics.track
-      payload = identifiers.merge( # Start with user_id/anonymous_id
-        event: 'Signed Up'
-      )
-    
-      Analytics.track(payload)
+      return if identifiers.empty?
+
+      Analytics.track(identifiers.merge(event: 'Signed Up'))
     end
 
     def internal_user?
+      # Used for marking internal users by email domain
       return false if SiteSetting.segment_io_internal_domain.blank?
-      email.ends_with?(SiteSetting.segment_io_internal_domain)
+      email.present? && email.ends_with?(SiteSetting.segment_io_internal_domain)
     end
   end
 
-  require_dependency 'application_controller'
   class ::ApplicationController
     before_action :emit_segment_user_tracker
 
@@ -130,115 +194,131 @@ end
       'about' => ['live_post_counts'],
       'topics' => ['timings']
     }.freeze
+
     def emit_segment_user_tracker
-      if current_user && !segment_common_controller_actions?
-        identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(current_user)
-        # Prepare the payload for Analytics.page
-        payload = identifiers.merge( # Start with user_id/anonymous_id
-          name: "#{controller_name}##{action_name}", # Page name
-          properties: { # Page properties
-            url: request.original_url
-            # title: view_context.try(:page_title) # Optional: if you want to send page title
-          },
-          context: { # Contextual information
-            ip: request.ip,
-            userAgent: request.user_agent # Segment often expects camelCase userAgent
-          }
-        )
-    
-        Analytics.page(payload)
-      end
+      return unless SiteSetting.segment_io_enabled?
+      return if segment_common_controller_actions?
+
+      identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(current_user, session)
+      return if identifiers.empty?
+
+      # Track full-page view for guests and users
+      payload = identifiers.merge(
+        name: "#{controller_name}##{action_name}",
+        properties: {
+          url: request.original_url,
+          path: request.path,
+          referrer: request.referrer,
+          title: view_context.try(:page_title) || "#{controller_name}##{action_name}"
+        },
+        context: {
+          ip: request.ip,
+          userAgent: request.user_agent
+        }
+      )
+      Analytics.page(payload)
     end
 
+    private
+
+    # Ignore noisy or useless page routes
     def segment_common_controller_actions?
-      SEGMENT_IO_EXCLUDES.keys.include?(controller_name) &&
-      (SEGMENT_IO_EXCLUDES[controller_name] == :all ||
-       SEGMENT_IO_EXCLUDES[controller_name].include?(action_name) )
+      SEGMENT_IO_EXCLUDES[controller_name] == :all ||
+        SEGMENT_IO_EXCLUDES[controller_name]&.include?(action_name)
     end
   end
 
-  require_dependency 'post'
   class ::Post
     after_create :emit_segment_post_created
 
     def emit_segment_post_created
-      post_author = self.user 
-    
-      identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(post_author)
-      payload = identifiers.merge(
+      return unless SiteSetting.segment_io_enabled?
+      author = user
+      return unless author
+
+      identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(author)
+      return if identifiers.empty?
+
+      Analytics.track(identifiers.merge(
         event: 'Post Created',
         properties: {
-          topic_id: self.topic_id,
-          post_number: self.post_number,
-          created_at: self.created_at,
-          # Ensure topic is available for since_topic_created
-          since_topic_created: self.topic ? (self.created_at - self.topic.created_at).to_i : nil,
-          reply_to_post_number: self.reply_to_post_number,
-          # Ensure internal_user? method is called on the post_author (User object)
-          internal: post_author.respond_to?(:internal_user?) ? post_author.internal_user? : nil
-        }.compact # Remove any nil properties
-      )
-      Analytics.track(payload)
+          topic_id: topic_id,
+          post_id: id,
+          post_number: post_number,
+          created_at: created_at.iso8601,
+          since_topic_created: topic ? (created_at - topic.created_at).to_i : nil,
+          reply_to_post_number: reply_to_post_number,
+          internal: author.internal_user?
+        }.compact
+      ))
     end
   end
 
-  require_dependency 'topic'
   class ::Topic
     after_create :emit_segment_topic_created
 
     def emit_segment_topic_created
-      topic_author = self.user
-      identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(topic_author)
-      payload = identifiers.merge(
+      return unless SiteSetting.segment_io_enabled?
+      author = user
+      return unless author
+
+      identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(author)
+      return if identifiers.empty?
+
+      Analytics.track(identifiers.merge(
         event: 'Topic Created',
         properties: {
-          slug: self.slug,
-          title: self.title,
-          url: self.url, # Assuming 'url' is a method on Topic model
-          internal: topic_author.respond_to?(:internal_user?) ? topic_author.internal_user? : nil
-        }.compact # Remove any nil properties
-      )
-      Analytics.track(payload)
+          topic_id: id,
+          slug: slug,
+          title: title,
+          url: url,
+          category_id: category_id,
+          created_at: created_at.iso8601,
+          internal: author.internal_user?
+        }.compact
+      ))
     end
   end
 
-  require_dependency 'topic_tag'
   class ::TopicTag
     after_create :emit_segment_topic_tagged
 
     def emit_segment_topic_tagged
-      # Passing 'nil' to get_segment_identifiers will trigger our fallback anonymous ID.
+      return unless SiteSetting.segment_io_enabled?
+      # Uses fallback guest_id since no user context
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(nil)
+      return if identifiers.empty?
 
-      payload = identifiers.merge( # This will contain the generated anonymous_id
+      Analytics.track(identifiers.merge(
         event: 'Topic Tag Created',
         properties: {
-          topic_id: self.topic_id,
-          tag_name: self.tag.name # Assuming 'tag' association and 'name' attribute exist
-        }.compact # Remove any nil properties
-      )
-      Analytics.track(payload)
+          topic_id: topic_id,
+          tag_name: tag&.name
+        }.compact
+      ))
     end
   end
 
-  require_dependency 'user_action'
   class ::UserAction
-    after_create :emit_segment_post_liked, if: -> { self.action_type == UserAction::LIKE }
+    after_create :emit_segment_post_liked, if: -> { action_type == UserAction::LIKE }
 
     def emit_segment_post_liked
-      action_user = self.user
-      identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(action_user)
-      payload = identifiers.merge(
+      return unless SiteSetting.segment_io_enabled?
+      actor = user
+      return unless actor
+
+      identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(actor)
+      return if identifiers.empty?
+
+      Analytics.track(identifiers.merge(
         event: 'Post Liked',
         properties: {
-          post_id: self.target_post_id,
-          topic_id: self.target_topic_id,
-          internal: action_user.respond_to?(:internal_user?) ? action_user.internal_user? : nil,
-          # Ensure target_topic is available for like_count
-          like_count: self.target_topic ? self.target_topic.like_count : nil
-        }.compact # Remove any nil properties
-      )
-      Analytics.track(payload)
+          post_id: target_post_id,
+          topic_id: target_topic_id,
+          like_count_on_topic: target_topic&.like_count,
+          internal: actor.internal_user?
+        }.compact
+      ))
     end
   end
 end
