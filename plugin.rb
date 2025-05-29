@@ -10,10 +10,8 @@ enabled_site_setting :segment_io_enabled
 
 after_initialize do
   require 'segment/analytics'
-  # This goes inside the after_initialize do block, near the top
-# but after any initial `require` statements like require 'segment/analytics'
-
-module DiscourseSegmentIdStrategy
+ 
+module DiscourseSegmentIdStrategy # New feature to allow for email <default> or sso is as userId with fallback to anonymous_id.  
   # Method to generate your custom "DECIMAL-HEX" anonymousId
   def self.generate_user_custom_anonymous_id(user) # Renamed for clarity within the module
     return nil unless user && user.id
