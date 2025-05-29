@@ -59,4 +59,4 @@ Please see [CONTRIBUTING.md](/CONTRIBUTING.md).
 
 ### License
 
-This plugin is © 2016 Kyle Welsby. It is free software, licensed under the terms specified in the [LICENSE](./license) file.
+This plugin is © 2016 Kyle Welsby. It is free software, licensed under the terms specified in the [LICENSE](./license) file. 
