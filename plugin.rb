@@ -14,6 +14,11 @@ after_initialize do
   # No explicit 'require "openssl"' needed as it's typically part of stdlib loaded by Rails/Discourse.
 
   module DiscourseSegmentIdStrategy
+    # Returns a normalized version of the email used for tracking
+    def self.normalize_email(email)
+      email.to_s.strip.downcase
+    end
+
     # Thread-safe fallback ID for guests with no session
     def self.fallback_guest_id
       Thread.current[:segment_fallback_guest_id] ||= "g#{SecureRandom.alphanumeric(35).downcase}"
@@ -55,8 +60,9 @@ after_initialize do
       case setting
       when 'email'
         # Use email as user_id if present
-        if user.email.present?
-          return { user_id: user.email }
+        normalized = normalize_email(user.email)
+        if normalized.present?
+          return { user_id: normalized }
         else
           Rails.logger.warn "[Segment.io Plugin] 'email' selected but missing for user #{user.id}"
         end
@@ -95,7 +101,7 @@ after_initialize do
       {
         name: user.name,
         username: user.username,
-        email: user.email,
+        email: (e = normalize_email(user.email); e.presence),
         created_at: user.created_at.iso8601,
         internal: user.internal_user? # flag used to segment internal team users
       }.compact
@@ -181,7 +187,9 @@ after_initialize do
     def internal_user?
       # Used for marking internal users by email domain
       return false if SiteSetting.segment_io_internal_domain.blank?
-      email.present? && email.ends_with?(SiteSetting.segment_io_internal_domain)
+      normalized = ::DiscourseSegmentIdStrategy.normalize_email(email)
+      domain = SiteSetting.segment_io_internal_domain.to_s.strip.downcase
+      normalized.present? && normalized.end_with?(domain)
     end
   end
 
