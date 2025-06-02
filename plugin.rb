@@ -1,18 +1,15 @@
 # name: Segment.io
 # about: Import your Discourse data to your Segment.io warehouse
-# version: 1.0.1
+# version: 2.0.0
 # authors: Kyle Welsby (Original), updated by Donnie W
-
-gem 'analytics-ruby', '2.2.2', require: false
-
 enabled_site_setting :segment_io_enabled
+
+gem 'analytics-ruby', '2.2.8'
 
 after_initialize do
   require 'segment/analytics'
-  # Using OpenSSL::Digest as per your preference in the last module snippet.
-  # No explicit 'require "openssl"' needed as it's typically part of stdlib loaded by Rails/Discourse.
 
-  module DiscourseSegmentIdStrategy
+  module ::DiscourseSegmentIdStrategy
     # Returns a normalized version of the email used for tracking
     def self.normalize_email(email)
       email.to_s.strip.downcase
@@ -107,7 +104,7 @@ after_initialize do
     end
   end
 
-  class Analytics
+  class ::Analytics
     @client_mutex = Mutex.new
 
     # Singleton Segment client (thread-safe)
@@ -147,6 +144,20 @@ after_initialize do
     end
   end
 
+  # Hook into user login events - FIXED: Send identify immediately AND enqueue job
+  DiscourseEvent.on(:user_logged_in) do |user|
+    Rails.logger.info "[Segment.io Plugin] User logged in: #{user.id} - #{user.email}"
+    next unless SiteSetting.segment_io_enabled?
+    
+    # Send identify immediately on login (don't wait for background job)
+    Rails.logger.info "[Segment.io Plugin] Sending immediate identify for user #{user.id}"
+    user.perform_segment_user_identify
+    
+    # Also enqueue background job as backup
+    Rails.logger.info "[Segment.io Plugin] Enqueuing identify job for user #{user.id}"
+    user.enqueue_segment_identify_job
+  end
+
   class ::User
     # Fire both identify and signup events in order
     after_create do
@@ -160,13 +171,15 @@ after_initialize do
 
     def perform_segment_user_identify # Method called by the background job
       return unless SiteSetting.segment_io_enabled?
+      Rails.logger.info "[Segment.io Plugin] Performing identify for user #{self.id}"
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(self)
       return if identifiers.empty?
 
       # Compose payload with traits (IP not available in background job context)
       payload = identifiers.merge(traits: ::DiscourseSegmentIdStrategy.get_user_traits(self))
+      Rails.logger.info "[Segment.io Plugin] Sending identify with payload: #{payload.inspect}"
 
-      Analytics.identify(payload)
+      ::Analytics.identify(payload)
     end
 
     def emit_segment_user_created
@@ -174,7 +187,7 @@ after_initialize do
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(self)
       return if identifiers.empty?
 
-      Analytics.track(identifiers.merge(event: 'Signed Up'))
+      ::Analytics.track(identifiers.merge(event: 'Signed Up'))
     end
 
     def internal_user?
@@ -222,7 +235,7 @@ after_initialize do
           userAgent: request.user_agent
         }
       )
-      Analytics.page(payload)
+      ::Analytics.page(payload)
     end
 
     private
@@ -245,7 +258,7 @@ after_initialize do
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(author)
       return if identifiers.empty?
 
-      Analytics.track(identifiers.merge(
+      ::Analytics.track(identifiers.merge(
         event: 'Post Created',
         properties: {
           topic_id: topic_id,
@@ -271,7 +284,7 @@ after_initialize do
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(author)
       return if identifiers.empty?
 
-      Analytics.track(identifiers.merge(
+      ::Analytics.track(identifiers.merge(
         event: 'Topic Created',
         properties: {
           topic_id: id,
@@ -295,7 +308,7 @@ after_initialize do
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(nil)
       return if identifiers.empty?
 
-      Analytics.track(identifiers.merge(
+      ::Analytics.track(identifiers.merge(
         event: 'Topic Tag Created',
         properties: {
           topic_id: topic_id,
@@ -316,7 +329,7 @@ after_initialize do
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(actor)
       return if identifiers.empty?
 
-      Analytics.track(identifiers.merge(
+      ::Analytics.track(identifiers.merge(
         event: 'Post Liked',
         properties: {
           post_id: target_post_id,
