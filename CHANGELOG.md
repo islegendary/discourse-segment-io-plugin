@@ -14,13 +14,19 @@ All notable changes to this plugin will be documented in this file.
   - User identify events
   - Custom anonymousId for non-email tracking
   - Page views, post and topic lifecycle events
-- Safer error handling in background jobs
+- Centralized `context.traits.email` population
 - Memoized Segment client for performance
+- Safer error handling in background jobs and plugin event hooks
 
 ### Changed
 - Refactored payload generation into `DiscourseSegmentIdStrategy`
 - Modularized `Analytics` client to allow dynamic method handling
+- Improved fallback handling for missing SSO IDs (fallback to email)
+- Normalize email addresses for consistency across tracking calls
 
 ### Deprecated
 - Use of `alias` method discouraged per Segment’s latest Unify guidance
 
+### Fixed
+- Issue where missing `external_id` caused fatal error in some environments
+- Ensured tracking events gracefully degrade when user information is missing or incomplete
