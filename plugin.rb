@@ -4,7 +4,7 @@
 # authors: Kyle Welsby (Original), updated by Donnie W
 enabled_site_setting :segment_io_enabled
 
-gem 'analytics-ruby', '2.2.8'
+gem 'analytics-ruby', '2.2.8' # Lastest default version for Open Source Dev build.  This can be changed if needed
 
 after_initialize do
   require 'segment/analytics'
@@ -37,7 +37,7 @@ after_initialize do
       "#{prefix}#{hash_segment}"
     end
 
-    # Adds email to context.traits if available (centralized for all tracking calls)
+    # Adds email to context.traits if available (centralized for all tracking calls) to assist with merging
     def self.add_email_to_context(payload, user)
       return payload unless user
       
