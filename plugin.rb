@@ -25,14 +25,14 @@ after_initialize do
 
       prefix = "#{user.id}-dc-" # fixed prefix with user.id
       input = "discourse_custom_anon_v1:#{user.id}:#{Rails.application.secret_key_base}" # salt input with app secret
-      
+
       # OpenSSL::Digest is preloaded in Discourse/Rails environments, no extra 'require' needed
       full_hash = OpenSSL::Digest::SHA256.hexdigest(input) # hashed string stays stable per user
 
       remaining_len = 36 - prefix.length
       # Trim hash so final ID = 36 chars
       hash_segment = remaining_len > 0 ? full_hash[0...remaining_len] : ""
-      
+
       "#{prefix}#{hash_segment}"
     end
 

@@ -21,9 +21,9 @@ You can now choose how Segment identifies users via the new `segment_io_user_id_
 | `email`            | Uses user email as the `userId`                                     |
 | `sso_external_id`  | Uses the user’s external ID from SSO if present                     |
 | `use_anon`         | Uses a custom, deterministic, 36-character `anonymousId`            |
-| `discourse_id'     | Uses the internal Discourse user ID (e.g. `123`)                    |
+| `discourse_id`     | Uses the internal Discourse user ID (e.g. `123`)                    |
 
-The `anonymousId` format is:  
+The `anonymousId` format is:
 ```
 <discourse_id>-dc-<derived_string>
 ```
@@ -44,13 +44,13 @@ User.pluck(:id).each do |uid|
 end
 ```
 
-**Note:**  
+**Note:**
 If your site previously used `discourse_id`, and you are switching to `use_anon`, Segment will treat these as **new distinct profiles** unless you use Unify rules to merge.
 
 
 ### Installation
 
-Watch Tutorial Video: https://youtu.be/AKR3ki9Kj38  
+Watch Tutorial Video: https://youtu.be/AKR3ki9Kj38
 In Segment, create a `Ruby` source and use your write key to configure this plugin in Discourse.
 
 ### Contributing
@@ -59,4 +59,4 @@ Please see [CONTRIBUTING.md](/CONTRIBUTING.md).
 
 ### License
 
-This plugin is © 2016 Kyle Welsby. It is free software, licensed under the terms specified in the [LICENSE](./license) file. 
+This plugin is © 2016 Kyle Welsby. It is free software, licensed under the terms specified in the [LICENSE](/LICENSE) file.
