@@ -3,7 +3,6 @@
 # version: 1.0.1
 # authors: Kyle Welsby (Original), updated by Donnie W
 
-gem 'commander', '4.4.3'
 gem 'analytics-ruby', '2.2.2', require: false
 
 enabled_site_setting :segment_io_enabled
@@ -124,17 +123,12 @@ after_initialize do
 
     # Delegate tracking methods to the Segment client
     def self.method_missing(method, *args, &block)
-      if segment_client = client # Assign and check if client is available
-        if segment_client.respond_to?(method)
-          return segment_client.send(method, *args, &block)
-        else
-          Rails.logger.warn "[Segment.io Plugin] Analytics client does not respond to unknown method: #{method}"
-          # To maintain standard Ruby behavior for unhandled methods, call super.
-          # If you intend to swallow these errors and return nil, this is a conscious choice.
-          # For now, returning nil as per your last version's implicit behavior for this path.
-        end
+      if (segment_client = client) && segment_client.respond_to?(method)
+        segment_client.public_send(method, *args, &block)
+      else
+        Rails.logger.warn "[Segment.io Plugin] Analytics client does not respond to unknown method: #{method}"
+        super
       end
-      nil # Return nil if client is not available or if method is unknown and not re-raised
     end
 
     def self.respond_to_missing?(method, include_private = false)
