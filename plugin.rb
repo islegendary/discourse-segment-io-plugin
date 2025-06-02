@@ -14,6 +14,11 @@ after_initialize do
   # No explicit 'require "openssl"' needed as it's typically part of stdlib loaded by Rails/Discourse.
 
   module DiscourseSegmentIdStrategy
+    # Returns a normalized version of the email used for tracking
+    def self.normalize_email(email)
+      email.to_s.strip.downcase
+    end
+
     # Thread-safe fallback ID for guests with no session
     def self.fallback_guest_id
       Thread.current[:segment_fallback_guest_id] ||= "g#{SecureRandom.alphanumeric(35).downcase}"
@@ -55,8 +60,9 @@ after_initialize do
       case setting
       when 'email'
         # Use email as user_id if present
-        if user.email.present?
-          return { user_id: user.email }
+        normalized = normalize_email(user.email)
+        if normalized.present?
+          return { user_id: normalized }
         else
           Rails.logger.warn "[Segment.io Plugin] 'email' selected but missing for user #{user.id}"
         end
@@ -95,7 +101,7 @@ after_initialize do
       {
         name: user.name,
         username: user.username,
-        email: user.email,
+        email: (e = normalize_email(user.email); e.presence),
         created_at: user.created_at.iso8601,
         internal: user.internal_user? # flag used to segment internal team users
       }.compact
@@ -142,7 +148,7 @@ after_initialize do
       def execute(args)
         return unless SiteSetting.segment_io_enabled?
         user = User.find_by_id(args[:user_id])
-        user&.perform_segment_user_identify
+        user&.perform_segment_user_identify(args[:ip_address])
       end
     end
   end
@@ -150,22 +156,23 @@ after_initialize do
   class ::User
     # Fire both identify and signup events in order
     after_create do
-      enqueue_segment_identify_job
+      enqueue_segment_identify_job(find_signup_ip)
       emit_segment_user_created
     end
 
-    def enqueue_segment_identify_job
-      Jobs.enqueue(:emit_segment_user_identify, user_id: self.id)
+    def enqueue_segment_identify_job(ip)
+      Jobs.enqueue(:emit_segment_user_identify, user_id: self.id, ip_address: ip)
     end
 
-    def perform_segment_user_identify # Method called by the background job
+    def perform_segment_user_identify(ip = nil) # Method called by the background job
       return unless SiteSetting.segment_io_enabled?
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(self)
       return if identifiers.empty?
 
       # Compose payload with traits and optional IP
       payload = identifiers.merge(traits: ::DiscourseSegmentIdStrategy.get_user_traits(self))
-      payload[:context] = { ip: ip_address } if respond_to?(:ip_address) && ip_address.present?
+      ip ||= ip_address if respond_to?(:ip_address)
+      payload[:context] = { ip: ip } if ip.present?
 
       Analytics.identify(payload)
     end
@@ -181,7 +188,19 @@ after_initialize do
     def internal_user?
       # Used for marking internal users by email domain
       return false if SiteSetting.segment_io_internal_domain.blank?
-      email.present? && email.ends_with?(SiteSetting.segment_io_internal_domain)
+      normalized = ::DiscourseSegmentIdStrategy.normalize_email(email)
+      domain = SiteSetting.segment_io_internal_domain.to_s.strip.downcase
+      normalized.present? && normalized.end_with?(domain)
+    end
+
+    private
+
+    def find_signup_ip
+      if respond_to?(:registration_ip_address) && registration_ip_address.present?
+        registration_ip_address
+      elsif respond_to?(:ip_address) && ip_address.present?
+        ip_address
+      end
     end
   end
 
