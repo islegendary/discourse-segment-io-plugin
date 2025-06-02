@@ -49,7 +49,7 @@ end
 ```
 
 **Note:**
-If your site previously used `discourse_id`, and you are switching to `use_anon`, Segment will treat these as **new distinct profiles** unless you use Unify rules to merge.
+If your site previously used `discourse_id`, and you are switching to new strategy, Segment will treat these as **new distinct profiles** unless you use Unify rules to merge.
 
 
 ### Installation
