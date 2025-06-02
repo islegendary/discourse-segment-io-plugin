@@ -37,6 +37,20 @@ after_initialize do
       "#{prefix}#{hash_segment}"
     end
 
+    # Adds email to context.traits if available (centralized for all tracking calls)
+    def self.add_email_to_context(payload, user)
+      return payload unless user
+      
+      email = normalize_email(user.email)
+      if email.present?
+        payload[:context] ||= {}
+        payload[:context][:traits] ||= {}
+        payload[:context][:traits][:email] = email
+      end
+      
+      payload
+    end
+
     # Returns the appropriate identifier (user_id or anonymous_id)
     def self.get_segment_identifiers(user, session = nil)
       unless user
@@ -64,11 +78,29 @@ after_initialize do
         end
       when 'sso_external_id'
         # Use SSO external ID if available
-        sso = user.single_sign_on_record&.external_id || user.external_id
-        if sso.present?
-          return { user_id: sso }
-        else
-          Rails.logger.warn "[Segment.io Plugin] 'sso_external_id' selected but missing for user #{user.id}"
+        begin
+          sso = user.single_sign_on_record&.external_id || user.external_id
+          if sso.present?
+            return { user_id: sso }
+          else
+            Rails.logger.warn "[Segment.io Plugin] 'sso_external_id' selected but missing for user #{user.id}, falling back to email"
+            # Fallback to email if SSO external ID is not available
+            normalized = normalize_email(user.email)
+            if normalized.present?
+              return { user_id: normalized }
+            else
+              Rails.logger.warn "[Segment.io Plugin] Email also missing for user #{user.id}, using anonymous fallback"
+            end
+          end
+        rescue NoMethodError => e
+          Rails.logger.error "[Segment.io Plugin] SSO external_id method error for user #{user.id}: #{e.message}, falling back to email"
+          # Fallback to email if SSO method doesn't exist
+          normalized = normalize_email(user.email)
+          if normalized.present?
+            return { user_id: normalized }
+          else
+            Rails.logger.warn "[Segment.io Plugin] Email also missing for user #{user.id}, using anonymous fallback"
+          end
         end
       when 'use_anon'
         # Force anonymous_id for all users
@@ -235,6 +267,10 @@ after_initialize do
           userAgent: request.user_agent
         }
       )
+      
+      # Add email to context.traits if available
+      payload = ::DiscourseSegmentIdStrategy.add_email_to_context(payload, current_user)
+      
       ::Analytics.page(payload)
     end
 
@@ -258,7 +294,7 @@ after_initialize do
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(author)
       return if identifiers.empty?
 
-      ::Analytics.track(identifiers.merge(
+      payload = identifiers.merge(
         event: 'Post Created',
         properties: {
           topic_id: topic_id,
@@ -269,7 +305,12 @@ after_initialize do
           reply_to_post_number: reply_to_post_number,
           internal: author.internal_user?
         }.compact
-      ))
+      )
+      
+      # Add email to context.traits if available
+      payload = ::DiscourseSegmentIdStrategy.add_email_to_context(payload, author)
+
+      ::Analytics.track(payload)
     end
   end
 
@@ -284,7 +325,7 @@ after_initialize do
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(author)
       return if identifiers.empty?
 
-      ::Analytics.track(identifiers.merge(
+      payload = identifiers.merge(
         event: 'Topic Created',
         properties: {
           topic_id: id,
@@ -295,7 +336,12 @@ after_initialize do
           created_at: created_at.iso8601,
           internal: author.internal_user?
         }.compact
-      ))
+      )
+      
+      # Add email to context.traits if available
+      payload = ::DiscourseSegmentIdStrategy.add_email_to_context(payload, author)
+
+      ::Analytics.track(payload)
     end
   end
 
@@ -308,13 +354,18 @@ after_initialize do
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(nil)
       return if identifiers.empty?
 
-      ::Analytics.track(identifiers.merge(
+      payload = identifiers.merge(
         event: 'Topic Tag Created',
         properties: {
           topic_id: topic_id,
           tag_name: tag&.name
         }.compact
-      ))
+      )
+      
+      # Add email to context.traits if available (no user in this case)
+      payload = ::DiscourseSegmentIdStrategy.add_email_to_context(payload, nil)
+
+      ::Analytics.track(payload)
     end
   end
 
@@ -329,7 +380,7 @@ after_initialize do
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(actor)
       return if identifiers.empty?
 
-      ::Analytics.track(identifiers.merge(
+      payload = identifiers.merge(
         event: 'Post Liked',
         properties: {
           post_id: target_post_id,
@@ -337,7 +388,12 @@ after_initialize do
           like_count_on_topic: target_topic&.like_count,
           internal: actor.internal_user?
         }.compact
-      ))
+      )
+      
+      # Add email to context.traits if available
+      payload = ::DiscourseSegmentIdStrategy.add_email_to_context(payload, actor)
+
+      ::Analytics.track(payload)
     end
   end
 end
