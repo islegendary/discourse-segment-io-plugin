@@ -12,6 +12,10 @@ Emits Discourse user and activity events to Segment.io using the official `analy
 - `track("Topic Tag Created")`
 - `page` — on controller/page-level requests
 
+### Email Added to Context
+
+When available, email is added to context.traits.email to help with merging profiles.
+
 ### Identity Strategy (New)
 
 You can now choose how Segment identifies users via the new `segment_io_user_id_source` site setting:
