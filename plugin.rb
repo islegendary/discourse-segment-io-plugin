@@ -148,7 +148,7 @@ after_initialize do
       def execute(args)
         return unless SiteSetting.segment_io_enabled?
         user = User.find_by_id(args[:user_id])
-        user&.perform_segment_user_identify(args[:ip_address])
+        user&.perform_segment_user_identify
       end
     end
   end
@@ -156,23 +156,21 @@ after_initialize do
   class ::User
     # Fire both identify and signup events in order
     after_create do
-      enqueue_segment_identify_job(find_signup_ip)
+      enqueue_segment_identify_job
       emit_segment_user_created
     end
 
-    def enqueue_segment_identify_job(ip)
-      Jobs.enqueue(:emit_segment_user_identify, user_id: self.id, ip_address: ip)
+    def enqueue_segment_identify_job
+      Jobs.enqueue(:emit_segment_user_identify, user_id: self.id)
     end
 
-    def perform_segment_user_identify(ip = nil) # Method called by the background job
+    def perform_segment_user_identify # Method called by the background job
       return unless SiteSetting.segment_io_enabled?
       identifiers = ::DiscourseSegmentIdStrategy.get_segment_identifiers(self)
       return if identifiers.empty?
 
-      # Compose payload with traits and optional IP
+      # Compose payload with traits (IP not available in background job context)
       payload = identifiers.merge(traits: ::DiscourseSegmentIdStrategy.get_user_traits(self))
-      ip ||= ip_address if respond_to?(:ip_address)
-      payload[:context] = { ip: ip } if ip.present?
 
       Analytics.identify(payload)
     end
@@ -195,13 +193,8 @@ after_initialize do
 
     private
 
-    def find_signup_ip
-      if respond_to?(:registration_ip_address) && registration_ip_address.present?
-        registration_ip_address
-      elsif respond_to?(:ip_address) && ip_address.present?
-        ip_address
-      end
-    end
+    # Note: IP address is captured in page view events via ApplicationController
+    # Background identify jobs don't have request context for IP tracking
   end
 
   class ::ApplicationController
